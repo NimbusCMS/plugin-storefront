@@ -1,6 +1,6 @@
 {
     "name": "nimbuscms/storefront",
-    "description": "A public, themed storefront for NimbusCMS: renders the Inventory item master as a shoppable catalog (categories, filter, sort, search, availability). An official plugin.",
+    "description": "A public, themed storefront for NimbusCMS: renders the Inventory item master as a shoppable catalog (categories, filter, sort, search, availability), with a cart + checkout via Commerce. An official plugin.",
     "type": "nimbuscms-plugin",
     "keywords": [
         "nimbuscms",
@@ -21,7 +21,8 @@
         "php": ">=8.2",
         "ext-json": "*",
         "nimbuscms/nimbus": "dev-main",
-        "nimbuscms/inventory": "dev-main"
+        "nimbuscms/inventory": "dev-main",
+        "nimbuscms/commerce": "dev-main"
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.95",
@@ -36,6 +37,10 @@
         {
             "type": "vcs",
             "url": "https://github.com/NimbusCMS/plugin-inventory"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/NimbusCMS/plugin-commerce"
         }
     ],
     "autoload": {

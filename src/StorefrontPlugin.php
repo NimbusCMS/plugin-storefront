@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace NimbusCMS\Storefront;
 
+use Nimbus\Http\Request;
+use Nimbus\Http\Response;
 use Nimbus\Plugin\Plugin;
 use Nimbus\Plugin\PluginContext;
+use NimbusCMS\Commerce\CartPort;
 use NimbusCMS\Inventory\CatalogReadPort;
 
 /**
@@ -31,9 +34,23 @@ final class StorefrontPlugin implements Plugin
         // installed, so the resolver degrades gracefully.
         $port = static fn (): ?CatalogReadPort => $context->services()->get(CatalogReadPort::class);
 
-        // A themed public section at /shop, with this plugin's default templates as
-        // the theme-overridable fallback.
-        $context->pages()->register('shop', new StorefrontResolver($port), dirname(__DIR__) . '/templates');
+        // The cart, driven through Commerce's CartPort (ADR 0026) — null when
+        // Commerce is absent, so a browse-only storefront still works.
+        $cartPort = static fn (): ?CartPort => $context->services()->get(CartPort::class);
+        $cart     = new StorefrontCart($cartPort);
+        $templates = dirname(__DIR__) . '/templates';
+
+        // The current cart's CSRF token, for add-to-cart forms on the shop pages.
+        $cartCsrf = static fn (Request $r): string => $cart->existing($r, $cartPort())['csrf'] ?? '';
+
+        // The themed public sections (ADR 0023): the catalog at /shop, and the cart.
+        $context->pages()->register('shop', new StorefrontResolver($port, $cartCsrf), $templates);
+        $context->pages()->register('cart', $cart->cartSection(...), $templates);
+
+        // The cart mutations — public POST actions (ADR 0017), CSRF-guarded, that
+        // redirect back to /cart.
+        $context->routes()->post('shop', '/cart/add', static fn (Request $r, array $p): Response => $cart->add($r));
+        $context->routes()->post('shop', '/cart/update', static fn (Request $r, array $p): Response => $cart->update($r));
 
         // Teach an agent what the storefront is (ADR 0013).
         $context->skills()->register('Storefront', Guide::text());

@@ -7,6 +7,7 @@
  * @var callable(?int):?array{url:string,alt:?string} $media
  * @var string $cspNonce
  * @var array<string,mixed> $item
+ * @var string $cart_csrf
  */
 $labels = ['in_stock' => 'In stock', 'low' => 'Low stock', 'out' => 'Out of stock'];
 $img    = $media($item['image_media_id']);
@@ -33,6 +34,14 @@ $img    = $media($item['image_media_id']);
         <h1><?= $e($item['name']) ?></h1>
         <p class="sf-p-price"><?= $e($item['price']) ?><?= $item['unit'] !== null ? ' <span>/ ' . $e($item['unit']) . '</span>' : '' ?></p>
         <p class="sf-p-avail <?= $e($item['availability']) ?>"><?= $e($labels[$item['availability']] ?? $item['availability']) ?></p>
+        <?php if ($item['availability'] !== 'out'): ?>
+            <form method="post" action="/ext/shop/cart/add" class="sf-add">
+                <input type="hidden" name="_cart_csrf" value="<?= $e($cart_csrf ?? '') ?>">
+                <input type="hidden" name="sku" value="<?= $e($item['sku_code']) ?>">
+                <input type="number" name="qty" value="1" min="1" max="999" inputmode="numeric" aria-label="Quantity">
+                <button type="submit" class="sf-btn sf-btn-primary">Add to cart</button>
+            </form>
+        <?php endif; ?>
         <?php if ($item['category'] !== null): ?>
             <p class="sf-p-cat"><?= $e($item['category']) ?></p>
         <?php endif; ?>
