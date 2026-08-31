@@ -1,0 +1,75 @@
+{
+    "name": "nimbuscms/storefront",
+    "description": "A public, themed storefront for NimbusCMS: renders the Inventory item master as a shoppable catalog (categories, filter, sort, search, availability). An official plugin.",
+    "type": "nimbuscms-plugin",
+    "keywords": [
+        "nimbuscms",
+        "nimbuscms-plugin",
+        "storefront",
+        "shop",
+        "ecommerce",
+        "catalog",
+        "cms"
+    ],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "DanMat"
+        }
+    ],
+    "require": {
+        "php": ">=8.2",
+        "ext-json": "*",
+        "nimbuscms/nimbus": "dev-main",
+        "nimbuscms/inventory": "dev-main"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.95",
+        "phpstan/phpstan": "^2.2",
+        "phpunit/phpunit": "^11.0"
+    },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/NimbusCMS/nimbus"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/NimbusCMS/plugin-inventory"
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "NimbusCMS\\Storefront\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "NimbusCMS\\Storefront\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "nimbus": {
+            "id": "nimbuscms.storefront",
+            "plugin": "NimbusCMS\\Storefront\\StorefrontPlugin"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse --memory-limit=512M",
+        "check": [
+            "@analyse",
+            "@test"
+        ],
+        "format": "php-cs-fixer fix",
+        "format:check": "php-cs-fixer fix --dry-run --diff"
+    },
+    "config": {
+        "sort-packages": true,
+        "platform": {
+            "php": "8.2.0"
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
