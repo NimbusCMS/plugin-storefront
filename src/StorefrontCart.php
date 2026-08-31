@@ -25,7 +25,10 @@ use NimbusCMS\Commerce\CartPort;
 final class StorefrontCart
 {
     public const COOKIE = 'nb_cart';
+    /** A short-lived cookie naming the visitor's just-placed order, so only they see its confirmation. */
+    public const ORDER_COOKIE = 'nb_order';
     private const COOKIE_TTL = 14 * 86400;
+    private const ORDER_TTL  = 3600;
 
     /** @param \Closure():?CartPort $cart resolved per request; null when Commerce is absent */
     public function __construct(private \Closure $cart)
@@ -48,7 +51,72 @@ final class StorefrontCart
         ], ['title' => 'Your cart'], 200, true);
     }
 
+    /** The `/checkout` page — the order summary + a customer form. Private. */
+    public function checkoutSection(Request $request): PageView
+    {
+        $port     = ($this->cart)();
+        $meta     = $this->existing($request, $port);
+        $contents = ($port !== null && $meta !== null) ? $port->contents($meta['token']) : ['lines' => [], 'total' => '0.00', 'count' => 0];
+
+        return new PageView('shop-checkout', [
+            'cart'      => $contents,
+            'csrf'      => $meta['csrf'] ?? '',
+            'available' => $port !== null,
+        ], ['title' => 'Checkout'], 200, true);
+    }
+
+    /**
+     * The `/order/{ref}` confirmation — shown **only** to the visitor who placed it
+     * (the `nb_order` cookie must name this ref), so an order ref can't be guessed
+     * to read someone else's confirmation. Any mismatch → the themed 404. Private.
+     */
+    public function orderSection(Request $request): ?PageView
+    {
+        $ref = $this->refFromPath($request->path);
+        if ($ref === null || $request->cookie(self::ORDER_COOKIE) !== $ref) {
+            return null;
+        }
+        return new PageView('shop-order', ['ref' => $ref], ['title' => 'Order received'], 200, true);
+    }
+
     // --- actions (POST /ext) --------------------------------------------
+
+    /**
+     * POST checkout: place the cart as an order (server-side prices, atomic stock
+     * reservation) and confirm. Always CSRF-verified (a cart always pre-exists at
+     * checkout). On success, redirect to the private confirmation and drop the
+     * one-time order cookie; on any failure, back to the cart.
+     */
+    public function checkout(Request $request): Response
+    {
+        $port = ($this->cart)();
+        if ($port === null) {
+            return Response::redirect('/shop');
+        }
+        $token = $request->cookie(self::COOKIE);
+        if ($token === null) {
+            return Response::redirect('/cart');
+        }
+        $meta = $port->getOrCreate($token);
+        if ($meta['token'] !== $token || !$port->csrfOk($token, $request->input('_cart_csrf'))) {
+            return Response::redirect('/cart');
+        }
+
+        $customer = [
+            'name'  => trim((string) ($request->input('name') ?? '')),
+            'email' => trim((string) ($request->input('email') ?? '')),
+        ];
+        try {
+            $ref = $port->checkout($token, $customer);
+        } catch (\InvalidArgumentException | \RuntimeException) {
+            // Empty cart, or stock that vanished between browsing and checkout —
+            // send them back to the cart rather than 500.
+            return Response::redirect('/cart');
+        }
+
+        return Response::redirect('/order/' . rawurlencode($ref))
+            ->withCookie(self::ORDER_COOKIE, $ref, self::ORDER_TTL);
+    }
 
     /** POST add: {sku, qty}. Mints the cart on first add (sets the cookie). */
     public function add(Request $request): Response
@@ -119,5 +187,15 @@ final class StorefrontCart
         // stale token mints a fresh empty one, which is harmless and rare.
         $meta = $port->getOrCreate($token);
         return $meta['token'] === $token ? $meta : null;
+    }
+
+    /** The order reference from a `/order/{ref}` path, or null for the bare `/order`. */
+    private function refFromPath(string $path): ?string
+    {
+        if (!str_starts_with($path, '/order/')) {
+            return null;
+        }
+        $ref = rawurldecode(explode('/', substr($path, strlen('/order/')), 2)[0]);
+        return trim($ref) === '' ? null : $ref;
     }
 }
