@@ -26,15 +26,24 @@ final class StorefrontResolver
     /** The handle this section is mounted at, and its URL prefix. */
     private const HANDLE = 'shop';
 
-    /** @param \Closure():?CatalogReadPort $port resolved per request; null when Inventory is absent */
-    public function __construct(private \Closure $port)
+    /**
+     * @param \Closure():?CatalogReadPort $port     resolved per request; null when Inventory is absent
+     * @param ?\Closure(Request):string   $cartCsrf the current cart's CSRF token (or '') for add-to-cart forms
+     */
+    public function __construct(private \Closure $port, private ?\Closure $cartCsrf = null)
     {
     }
 
     public function __invoke(Request $request): ?PageView
     {
         $sku = $this->skuFromPath($request->path);
-        return $sku === null ? $this->listing($request) : $this->product($sku);
+        return $sku === null ? $this->listing($request) : $this->product($request, $sku);
+    }
+
+    /** The current cart's CSRF token for add-to-cart forms (empty when no cart yet). */
+    private function cartCsrf(Request $request): string
+    {
+        return $this->cartCsrf !== null ? ($this->cartCsrf)($request) : '';
     }
 
     /** The listing at `/shop` — filters from the query, always a page (never 404). */
@@ -64,18 +73,20 @@ final class StorefrontResolver
                 'sort'     => is_string($filters['sort']) ? $filters['sort'] : '',
             ],
             'available'  => $port !== null,
+            'cart_csrf'  => $this->cartCsrf($request),
         ], ['title' => 'Shop', 'description' => 'Browse our range.']);
     }
 
     /** A product page at `/shop/{sku}`, or null (→ themed 404) when not found/active. */
-    private function product(string $sku): ?PageView
+    private function product(Request $request, string $sku): ?PageView
     {
         $item = (($this->port)())?->get($sku);
         if ($item === null) {
             return null;
         }
         return new PageView('shop-product', [
-            'item' => $item,
+            'item'      => $item,
+            'cart_csrf' => $this->cartCsrf($request),
         ], ['title' => $item['name'], 'description' => $item['description'] ?? '', 'og_type' => 'product']);
     }
 
