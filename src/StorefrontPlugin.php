@@ -46,11 +46,14 @@ final class StorefrontPlugin implements Plugin
         // The themed public sections (ADR 0023): the catalog at /shop, and the cart.
         $context->pages()->register('shop', new StorefrontResolver($port, $cartCsrf), $templates);
         $context->pages()->register('cart', $cart->cartSection(...), $templates);
+        $context->pages()->register('checkout', $cart->checkoutSection(...), $templates);
+        $context->pages()->register('order', $cart->orderSection(...), $templates);
 
-        // The cart mutations — public POST actions (ADR 0017), CSRF-guarded, that
-        // redirect back to /cart.
+        // The cart + checkout mutations — public POST actions (ADR 0017),
+        // CSRF-guarded, that redirect (POST-redirect-GET) to a private page.
         $context->routes()->post('shop', '/cart/add', static fn (Request $r, array $p): Response => $cart->add($r));
         $context->routes()->post('shop', '/cart/update', static fn (Request $r, array $p): Response => $cart->update($r));
+        $context->routes()->post('shop', '/checkout', static fn (Request $r, array $p): Response => $cart->checkout($r));
 
         // Teach an agent what the storefront is (ADR 0013).
         $context->skills()->register('Storefront', Guide::text());

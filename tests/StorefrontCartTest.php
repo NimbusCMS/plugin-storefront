@@ -84,6 +84,50 @@ final class StorefrontCartTest extends TestCase
         self::assertSame(302, $res->status);
         self::assertSame('/shop', $res->headers['Location'] ?? null);
     }
+
+    public function test_the_checkout_page_is_private(): void
+    {
+        $view = $this->cart->checkoutSection($this->request('GET'));
+        self::assertSame('shop-checkout', $view->template);
+        self::assertTrue($view->private);
+    }
+
+    public function test_checkout_requires_csrf_and_confirms_to_a_private_gated_order(): void
+    {
+        $token = $this->port->seed('sec');
+
+        // Wrong CSRF → back to cart, no order.
+        $bad = $this->cart->checkout($this->request('POST', ['name' => 'Sam', 'email' => 'sam@x.test', '_cart_csrf' => 'nope'], $token));
+        self::assertSame('/cart', $bad->headers['Location'] ?? null);
+        self::assertSame([], $this->port->checkedOut);
+
+        // Correct CSRF → order placed, redirect to the confirmation, order cookie set.
+        $ok = $this->cart->checkout($this->request('POST', ['name' => 'Sam', 'email' => 'sam@x.test', '_cart_csrf' => 'sec'], $token));
+        self::assertSame('/order/ORD-TEST', $ok->headers['Location'] ?? null);
+        self::assertStringContainsString(StorefrontCart::ORDER_COOKIE . '=ORD-TEST', $ok->headers['Set-Cookie'] ?? '');
+        self::assertCount(1, $this->port->checkedOut);
+        self::assertSame('sam@x.test', $this->port->checkedOut[0]['email']);
+    }
+
+    public function test_checkout_without_a_cart_cookie_redirects_to_cart(): void
+    {
+        $res = $this->cart->checkout($this->request('POST', ['name' => 'Sam', 'email' => 'a@b.test']));
+        self::assertSame('/cart', $res->headers['Location'] ?? null);
+        self::assertSame([], $this->port->checkedOut);
+    }
+
+    public function test_the_order_confirmation_is_gated_to_the_order_cookie(): void
+    {
+        // With the matching order cookie → the confirmation renders (private).
+        $seen = $this->cart->orderSection(new Request('GET', '/order/ORD-TEST', [], [], [], [], null, '', [StorefrontCart::ORDER_COOKIE => 'ORD-TEST']));
+        self::assertInstanceOf(PageView::class, $seen);
+        self::assertTrue($seen->private);
+        self::assertSame('ORD-TEST', $seen->data['ref']);
+
+        // Without the cookie (a guesser), or a mismatched ref → the themed 404.
+        self::assertNull($this->cart->orderSection(new Request('GET', '/order/ORD-TEST', [], [], [], [], null, '', [])));
+        self::assertNull($this->cart->orderSection(new Request('GET', '/order/OTHER', [], [], [], [], null, '', [StorefrontCart::ORDER_COOKIE => 'ORD-TEST'])));
+    }
 }
 
 /** A minimal CartPort double that records what the storefront asked it to do. */
@@ -97,6 +141,8 @@ final class FakeCartPort implements CartPort
     public array $added = [];
     /** @var list<array{0:string,1:string}> */
     public array $setQ = [];
+    /** @var list<array{name?:string,email?:string}> */
+    public array $checkedOut = [];
 
     /** Seed a pre-existing cart, returning its token. */
     public function seed(string $csrf): string
@@ -143,6 +189,7 @@ final class FakeCartPort implements CartPort
 
     public function checkout(string $token, array $customer): string
     {
+        $this->checkedOut[] = $customer;
         return 'ORD-TEST';
     }
 }
