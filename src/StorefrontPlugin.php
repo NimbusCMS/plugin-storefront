@@ -60,6 +60,10 @@ final class StorefrontPlugin implements Plugin
         $context->routes()->post('shop', '/cart/update', static fn (Request $r, array $p): Response => $cart->update($r));
         $context->routes()->post('shop', '/checkout', static fn (Request $r, array $p): Response => $cart->checkout($r));
 
+        // Feed live featured products into the themed home page (ADR 0027) — a
+        // theme with a "featured" row renders them; others simply ignore the data.
+        $context->viewData()->register(new StorefrontViewData($port));
+
         // Teach an agent what the storefront is (ADR 0013).
         $context->skills()->register('Storefront', Guide::text());
     }
