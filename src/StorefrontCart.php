@@ -126,7 +126,7 @@ final class StorefrontCart
         foreach ($order['lines'] as $line) {
             // Active item → its name; an inactive/deleted SKU → the SKU itself (never blank/500).
             $item = $catalog?->get($line['sku_code']);
-            $name = is_array($item) && is_string($item['name'] ?? null) ? $item['name'] : $line['sku_code'];
+            $name = is_array($item) ? $item['name'] : $line['sku_code'];
             $lines[] = [
                 'name'       => $name,
                 'sku_code'   => $line['sku_code'],
