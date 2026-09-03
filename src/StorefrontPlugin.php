@@ -61,6 +61,10 @@ final class StorefrontPlugin implements Plugin
 
         // The cart + checkout mutations — public POST actions (ADR 0017),
         // CSRF-guarded, that redirect (POST-redirect-GET) to a private page.
+        // The visitor's own cart count as JSON (no-store, count-only) — lets a theme
+        // fill a header badge on a page-cached content page without baking a
+        // per-visitor count into the shared cache (ADR 0017).
+        $context->routes()->get('shop', '/cart/summary', static fn (Request $r, array $p): Response => $cart->summaryResponse($r));
         $context->routes()->post('shop', '/cart/add', static fn (Request $r, array $p): Response => $cart->add($r));
         $context->routes()->post('shop', '/cart/update', static fn (Request $r, array $p): Response => $cart->update($r));
         $context->routes()->post('shop', '/checkout', static fn (Request $r, array $p): Response => $cart->checkout($r));

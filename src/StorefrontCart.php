@@ -226,6 +226,23 @@ final class StorefrontCart
         return $this->summaryOf($port->contents($meta['token']));
     }
 
+    /**
+     * GET `/ext/shop/cart/summary` — the visitor's own cart **count** as JSON, so a
+     * theme can fill a header badge on a page-cached CONTENT page WITHOUT baking a
+     * per-visitor count into the shared cache. Read-only (never mints); the answer
+     * is a pure function of the caller's own opaque HttpOnly `nb_cart` cookie (no
+     * id parameter → no IDOR; no cookie → 0). Returns ONLY `{count}` — no lines, no
+     * token, no PII. `no-store` + being JSON keep it out of the page cache (core
+     * caches only 200 text/html), so it can never leak across visitors.
+     */
+    public function summaryResponse(Request $request): Response
+    {
+        $summary = $this->summary($request);
+        $count   = $summary === null ? 0 : $summary['count'];
+        return Response::json(['count' => $count])
+            ->withHeader('Cache-Control', 'no-store, private');
+    }
+
     // --- helpers ---------------------------------------------------------
 
     /**

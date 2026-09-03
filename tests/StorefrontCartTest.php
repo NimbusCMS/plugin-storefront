@@ -256,6 +256,34 @@ final class StorefrontCartTest extends TestCase
         self::assertSame('1.80', $order['lines'][0]['line_total']);
     }
 
+    public function test_the_cart_summary_endpoint_is_count_only_json_and_never_cached(): void
+    {
+        $token = $this->port->seed('sec');
+        $this->port->stubContents = ['lines' => [
+            ['sku_code' => 'apple', 'qty' => 2, 'name' => 'Apple', 'unit' => null, 'unit_price' => '1.00', 'line_total' => '2.00', 'availability' => 'in_stock'],
+            ['sku_code' => 'milk', 'qty' => 3, 'name' => 'Milk', 'unit' => null, 'unit_price' => '1.00', 'line_total' => '3.00', 'availability' => 'in_stock'],
+        ], 'total' => '5.00', 'count' => 2];
+
+        $res = $this->cart->summaryResponse($this->request('GET', [], $token));
+
+        self::assertSame(200, $res->status);
+        self::assertStringContainsString('application/json', (string) $res->header('Content-Type'));
+        self::assertStringContainsString('no-store', (string) $res->header('Cache-Control'), 'never entered the page cache');
+        self::assertStringContainsString('"count":5', $res->body, 'the count is Σ line qty');
+        // Count ONLY — no lines, SKUs, total, or any cart contents leak.
+        self::assertStringNotContainsString('apple', $res->body);
+        self::assertStringNotContainsString('total', $res->body);
+        self::assertStringNotContainsString('line', $res->body);
+        self::assertSame([], $this->port->minted, 'reading the summary never mints a cart');
+    }
+
+    public function test_the_cart_summary_endpoint_is_zero_without_a_cart(): void
+    {
+        $res = $this->cart->summaryResponse($this->request('GET'));
+        self::assertStringContainsString('"count":0', $res->body);
+        self::assertStringContainsString('no-store', (string) $res->header('Cache-Control'));
+    }
+
     public function test_the_confirmation_falls_back_to_ref_only_without_commerce(): void
     {
         // No order-read port wired → order is null, the page still renders.
