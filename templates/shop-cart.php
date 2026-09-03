@@ -7,10 +7,21 @@
  * @var array{lines:list<array<string,mixed>>,total:string,count:int} $cart
  * @var string $csrf
  * @var bool $available
+ * @var ?string $notice
  */
+$notices = [
+    'unavailable' => 'That item is unavailable right now.',
+    'expired'     => 'Your session expired — please try again.',
+    'empty'       => 'Your cart is empty.',
+    'stock'       => 'Sorry, an item just went out of stock — please review your cart.',
+];
 ?>
 <div class="sf-wrap">
     <h1>Your cart</h1>
+
+    <?php if (($notice ?? null) !== null && isset($notices[$notice])): ?>
+        <p class="sf-flash sf-flash-warn" role="status"><?= $e($notices[$notice]) ?></p>
+    <?php endif; ?>
 
     <?php if (!$available): ?>
         <p class="sf-empty">The cart is unavailable right now.</p>

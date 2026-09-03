@@ -50,7 +50,7 @@ final class StorefrontCartTest extends TestCase
         $res = $this->cart->add($this->request('POST', ['sku' => 'apple', 'qty' => '2']));
 
         self::assertSame(302, $res->status);
-        self::assertSame('/cart', $res->headers['Location'] ?? null);
+        self::assertSame('/cart?added=apple', $res->headers['Location'] ?? null, 'no return field → /cart, with the added flash');
         self::assertStringContainsString(StorefrontCart::COOKIE . '=', $res->headers['Set-Cookie'] ?? '');
         self::assertStringContainsString('HttpOnly', $res->headers['Set-Cookie'] ?? '');
         self::assertStringContainsString('SameSite=Lax', $res->headers['Set-Cookie'] ?? '');
@@ -98,7 +98,7 @@ final class StorefrontCartTest extends TestCase
 
         // Wrong CSRF → back to cart, no order.
         $bad = $this->cart->checkout($this->request('POST', ['name' => 'Sam', 'email' => 'sam@x.test', '_cart_csrf' => 'nope'], $token));
-        self::assertSame('/cart', $bad->headers['Location'] ?? null);
+        self::assertSame('/cart?notice=expired', $bad->headers['Location'] ?? null);
         self::assertSame([], $this->port->checkedOut);
 
         // Correct CSRF → order placed, redirect to the confirmation, order cookie set.
@@ -112,8 +112,84 @@ final class StorefrontCartTest extends TestCase
     public function test_checkout_without_a_cart_cookie_redirects_to_cart(): void
     {
         $res = $this->cart->checkout($this->request('POST', ['name' => 'Sam', 'email' => 'a@b.test']));
-        self::assertSame('/cart', $res->headers['Location'] ?? null);
+        self::assertSame('/cart?notice=expired', $res->headers['Location'] ?? null);
         self::assertSame([], $this->port->checkedOut);
+    }
+
+    /**
+     * The add-to-cart return URL is composed SERVER-SIDE from the allow-listed form
+     * fields only — never an echoed path/URL — so it can only ever be an on-site
+     * `/shop…`, `/shop/{sku}`, or `/cart`. A hostile `category`/`sku`/etc. is
+     * URL-encoded into a query value (or the fixed path prefix) and can't escape the
+     * site or inject a header. (Open-redirect regression, ADR 0026.)
+     */
+    public function test_add_returns_to_an_allow_listed_on_site_origin(): void
+    {
+        // return=shop → the filter query, then the added flash — all under /shop.
+        $shop = $this->cart->add($this->request('POST', [
+            'sku' => 'apple', 'return' => 'shop',
+            'category' => 'fruit', 'q' => 'milk', 'sort' => 'name', 'page' => '2',
+        ]));
+        self::assertSame('/shop?category=fruit&q=milk&sort=name&page=2&added=apple', $shop->headers['Location'] ?? null);
+
+        // return=product → the product page (sku in a rawurlencoded path segment).
+        $prod = $this->cart->add($this->request('POST', ['sku' => 'apple', 'return' => 'product']));
+        self::assertSame('/shop/apple?added=apple', $prod->headers['Location'] ?? null);
+
+        // An unknown return value falls back to /cart (never an echoed target).
+        $other = $this->cart->add($this->request('POST', ['sku' => 'apple', 'return' => 'http://evil.example']));
+        self::assertSame('/cart?added=apple', $other->headers['Location'] ?? null);
+    }
+
+    /**
+     * A hostile origin field can't produce an off-site or protocol-relative redirect,
+     * nor a CRLF header injection: `http_build_query` URL-encodes every value and the
+     * path uses fixed prefixes + rawurlencode.
+     */
+    public function test_add_return_url_cannot_escape_the_site(): void
+    {
+        $evil = $this->cart->add($this->request('POST', [
+            'sku' => '//evil.example/x', 'return' => 'shop',
+            'category' => "//evil.example\r\nSet-Cookie: pwn=1", 'q' => 'https://evil.example',
+        ]));
+        $loc = $evil->headers['Location'] ?? '';
+        self::assertStringStartsWith('/shop?', $loc, 'stays on-site under /shop');
+        self::assertStringNotContainsString('//evil', $loc, 'no protocol-relative host survives');
+        self::assertStringNotContainsString("\r", $loc, 'no CR');
+        self::assertStringNotContainsString("\n", $loc, 'no LF');
+
+        // return=product with a hostile sku → a single rawurlencoded path segment.
+        $prod = $this->cart->add($this->request('POST', ['sku' => '//evil.example', 'return' => 'product']));
+        self::assertStringStartsWith('/shop/%2F%2Fevil.example', $prod->headers['Location'] ?? '');
+    }
+
+    public function test_checkout_failure_notices_say_why(): void
+    {
+        // An empty cart → notice=empty.
+        $this->port->throwOnCheckout = new \InvalidArgumentException('empty');
+        $empty = $this->cart->checkout($this->request('POST', ['_cart_csrf' => 'sec'], $this->port->seed('sec')));
+        self::assertSame('/cart?notice=empty', $empty->headers['Location'] ?? null);
+
+        // Stock vanished (a failed reservation) → notice=stock.
+        $this->port->throwOnCheckout = new \RuntimeException('reservation failed');
+        $stock = $this->cart->checkout($this->request('POST', ['_cart_csrf' => 'sec'], 'existing-token'));
+        self::assertSame('/cart?notice=stock', $stock->headers['Location'] ?? null);
+    }
+
+    public function test_summary_counts_total_qty_and_never_mints(): void
+    {
+        // No cookie → null, and nothing minted (a header pill must never create a cart).
+        self::assertNull($this->cart->summary($this->request('GET')));
+        self::assertSame([], $this->port->minted);
+
+        // A seeded cart with two lines → count is the SUM of line quantities.
+        $token = $this->port->seed('sec');
+        $this->port->stubContents = ['lines' => [
+            ['sku_code' => 'apple', 'qty' => 2, 'name' => 'Apple', 'unit' => null, 'unit_price' => '1.00', 'line_total' => '2.00', 'availability' => 'in_stock'],
+            ['sku_code' => 'milk', 'qty' => 3, 'name' => 'Milk', 'unit' => null, 'unit_price' => '1.00', 'line_total' => '3.00', 'availability' => 'in_stock'],
+        ], 'total' => '5.00', 'count' => 2];
+        $summary = $this->cart->summary($this->request('GET', [], $token));
+        self::assertSame(['count' => 5, 'total' => '5.00'], $summary, 'count = Σ line qty, not distinct-line count');
     }
 
     public function test_the_order_confirmation_is_gated_to_the_order_cookie(): void
@@ -143,6 +219,9 @@ final class FakeCartPort implements CartPort
     public array $setQ = [];
     /** @var list<array{name?:string,email?:string}> */
     public array $checkedOut = [];
+    /** @var array{lines:list<array<string,mixed>>,total:string,count:int}|null */
+    public ?array $stubContents = null;
+    public ?\Throwable $throwOnCheckout = null;
 
     /** Seed a pre-existing cart, returning its token. */
     public function seed(string $csrf): string
@@ -184,11 +263,14 @@ final class FakeCartPort implements CartPort
 
     public function contents(string $token): array
     {
-        return ['lines' => [], 'total' => '0.00', 'count' => 0];
+        return $this->stubContents ?? ['lines' => [], 'total' => '0.00', 'count' => 0];
     }
 
     public function checkout(string $token, array $customer): string
     {
+        if ($this->throwOnCheckout !== null) {
+            throw $this->throwOnCheckout;
+        }
         $this->checkedOut[] = $customer;
         return 'ORD-TEST';
     }

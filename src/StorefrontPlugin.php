@@ -43,8 +43,13 @@ final class StorefrontPlugin implements Plugin
         // The current cart's CSRF token, for add-to-cart forms on the shop pages.
         $cartCsrf = static fn (Request $r): string => $cart->existing($r, $cartPort())['csrf'] ?? '';
 
+        // The cart summary (count + total) for the header pill — read-only, never
+        // mints a cart, and passed ONLY into section PageViews (never the
+        // path-cached content pages), so a count can't leak across visitors.
+        $cartSummary = static fn (Request $r): ?array => $cart->summary($r);
+
         // The themed public sections (ADR 0023): the catalog at /shop, and the cart.
-        $context->pages()->register('shop', new StorefrontResolver($port, $cartCsrf), $templates);
+        $context->pages()->register('shop', new StorefrontResolver($port, $cartCsrf, $cartSummary), $templates);
         $context->pages()->register('cart', $cart->cartSection(...), $templates);
         $context->pages()->register('checkout', $cart->checkoutSection(...), $templates);
         $context->pages()->register('order', $cart->orderSection(...), $templates);

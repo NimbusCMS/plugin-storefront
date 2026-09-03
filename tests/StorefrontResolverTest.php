@@ -97,6 +97,46 @@ final class StorefrontResolverTest extends TestCase
     {
         self::assertNull(($this->resolver(null))($this->request('/shop/milk')));
     }
+
+    /**
+     * The `?added=` flash resolves the item's NAME through the port (active-only) —
+     * it never reflects the raw query value. A real SKU yields the name; a bogus one
+     * yields null (no banner), so `?added=<script>` can't be reflected.
+     */
+    public function test_added_flash_is_looked_up_never_reflected(): void
+    {
+        $view = ($this->resolver($this->fakePort()))($this->request('/shop', ['added' => 'milk']));
+        self::assertSame(['sku' => 'milk', 'name' => 'Milk'], $view->data['added'], 'canonical sku + name from the catalog');
+
+        $bogus = ($this->resolver($this->fakePort()))($this->request('/shop', ['added' => '<script>alert(1)</script>']));
+        self::assertNull($bogus->data['added'], 'a non-item SKU yields no banner — the raw value is never reflected');
+    }
+
+    /** The `?notice=` code is a validated enum — an unknown/hostile value becomes null. */
+    public function test_notice_is_a_validated_enum(): void
+    {
+        $ok = ($this->resolver($this->fakePort()))($this->request('/shop', ['notice' => 'unavailable']));
+        self::assertSame('unavailable', $ok->data['notice']);
+
+        $bad = ($this->resolver($this->fakePort()))($this->request('/shop', ['notice' => '<script>alert(1)</script>']));
+        self::assertNull($bad->data['notice']);
+    }
+
+    /** The cart summary closure feeds the header pill on section pages only. */
+    public function test_cart_summary_closure_is_surfaced_when_present(): void
+    {
+        $resolver = new StorefrontResolver(
+            static fn (): CatalogReadPort => new FakeCatalogPort(),
+            null,
+            static fn (Request $r): array => ['count' => 4, 'total' => '9.99'],
+        );
+        $view = $resolver($this->request('/shop'));
+        self::assertSame(['count' => 4, 'total' => '9.99'], $view->data['cart_summary']);
+
+        // Absent closure → null (a content page would get no count).
+        $view2 = ($this->resolver($this->fakePort()))($this->request('/shop'));
+        self::assertNull($view2->data['cart_summary']);
+    }
 }
 
 /**
