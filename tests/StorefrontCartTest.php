@@ -7,6 +7,8 @@ namespace NimbusCMS\Storefront\Tests;
 use Nimbus\Http\Request;
 use Nimbus\Site\PageView;
 use NimbusCMS\Commerce\CartPort;
+use NimbusCMS\Commerce\OrderReadPort;
+use NimbusCMS\Inventory\CatalogReadPort;
 use NimbusCMS\Storefront\StorefrontCart;
 use PHPUnit\Framework\TestCase;
 
@@ -203,6 +205,64 @@ final class StorefrontCartTest extends TestCase
         // Without the cookie (a guesser), or a mismatched ref → the themed 404.
         self::assertNull($this->cart->orderSection(new Request('GET', '/order/ORD-TEST', [], [], [], [], null, '', [])));
         self::assertNull($this->cart->orderSection(new Request('GET', '/order/OTHER', [], [], [], [], null, '', [StorefrontCart::ORDER_COOKIE => 'ORD-TEST'])));
+    }
+
+    public function test_the_confirmation_is_itemised_with_resolved_names_and_a_sku_fallback(): void
+    {
+        $orderPort = new class () implements OrderReadPort {
+            public function get(string $ref): ?array
+            {
+                return $ref !== 'ORD-TEST' ? null : [
+                    'reference' => 'ORD-TEST', 'status' => 'placed', 'total' => '3.80', 'placed_at' => '2026-01-01 09:00:00',
+                    'lines' => [
+                        ['sku_code' => 'avocado', 'qty' => 2, 'unit_price' => '0.90', 'line_total' => '1.80'],
+                        ['sku_code' => 'discontinued', 'qty' => 1, 'unit_price' => '2.00', 'line_total' => '2.00'],
+                    ],
+                ];
+            }
+        };
+        $catalog = new class () implements CatalogReadPort {
+            public function list(array $filters): array
+            {
+                return ['items' => [], 'total' => 0, 'page' => 1, 'per_page' => 0, 'pages' => 0];
+            }
+
+            public function get(string $sku): ?array
+            {
+                // 'avocado' is active → a name; 'discontinued' is gone → null.
+                return $sku !== 'avocado' ? null : [
+                    'sku_code' => 'avocado', 'name' => 'Avocado', 'price' => '0.90', 'unit' => 'each',
+                    'description' => null, 'image_media_id' => null, 'category_id' => null,
+                    'category' => null, 'featured' => false, 'availability' => 'in_stock',
+                ];
+            }
+
+            public function categories(): array
+            {
+                return [];
+            }
+        };
+
+        $port = $this->port;
+        $cart = new StorefrontCart(static fn (): CartPort => $port, static fn (): OrderReadPort => $orderPort, static fn (): CatalogReadPort => $catalog);
+
+        $view = $cart->orderSection(new Request('GET', '/order/ORD-TEST', [], [], [], [], null, '', [StorefrontCart::ORDER_COOKIE => 'ORD-TEST']));
+        self::assertInstanceOf(PageView::class, $view);
+        $order = $view->data['order'];
+        self::assertSame('3.80', $order['total']);
+        self::assertSame('placed', $order['status']);
+        self::assertSame('Avocado', $order['lines'][0]['name'], 'an active SKU resolves to its name');
+        self::assertSame('discontinued', $order['lines'][1]['name'], 'a gone SKU falls back to the SKU itself');
+        self::assertSame('1.80', $order['lines'][0]['line_total']);
+    }
+
+    public function test_the_confirmation_falls_back_to_ref_only_without_commerce(): void
+    {
+        // No order-read port wired → order is null, the page still renders.
+        $view = $this->cart->orderSection(new Request('GET', '/order/ORD-TEST', [], [], [], [], null, '', [StorefrontCart::ORDER_COOKIE => 'ORD-TEST']));
+        self::assertInstanceOf(PageView::class, $view);
+        self::assertSame('ORD-TEST', $view->data['ref']);
+        self::assertNull($view->data['order']);
     }
 }
 
