@@ -9,6 +9,7 @@ use Nimbus\Http\Response;
 use Nimbus\Plugin\Plugin;
 use Nimbus\Plugin\PluginContext;
 use NimbusCMS\Commerce\CartPort;
+use NimbusCMS\Commerce\OrderReadPort;
 use NimbusCMS\Inventory\CatalogReadPort;
 
 /**
@@ -36,8 +37,12 @@ final class StorefrontPlugin implements Plugin
 
         // The cart, driven through Commerce's CartPort (ADR 0026) — null when
         // Commerce is absent, so a browse-only storefront still works.
-        $cartPort = static fn (): ?CartPort => $context->services()->get(CartPort::class);
-        $cart     = new StorefrontCart($cartPort);
+        $cartPort  = static fn (): ?CartPort => $context->services()->get(CartPort::class);
+        // The public-safe order read (ADR 0026) for the itemised confirmation, and
+        // the catalog port to resolve each line's SKU to a display name. Both
+        // resolved lazily; null-safe when their plugin is absent.
+        $orderRead = static fn (): ?OrderReadPort => $context->services()->get(OrderReadPort::class);
+        $cart      = new StorefrontCart($cartPort, $orderRead, $port);
         $templates = dirname(__DIR__) . '/templates';
 
         // The current cart's CSRF token, for add-to-cart forms on the shop pages.

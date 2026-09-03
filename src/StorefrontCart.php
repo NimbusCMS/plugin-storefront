@@ -8,6 +8,8 @@ use Nimbus\Http\Request;
 use Nimbus\Http\Response;
 use Nimbus\Site\PageView;
 use NimbusCMS\Commerce\CartPort;
+use NimbusCMS\Commerce\OrderReadPort;
+use NimbusCMS\Inventory\CatalogReadPort;
 
 /**
  * The storefront's public cart + checkout face (ADR 0026). It owns the themed
@@ -37,9 +39,16 @@ final class StorefrontCart
     /** The only notice codes a template will render — anything else is ignored (no reflection). */
     private const NOTICES = ['unavailable', 'expired', 'empty', 'stock'];
 
-    /** @param \Closure():?CartPort $cart resolved per request; null when Commerce is absent */
-    public function __construct(private \Closure $cart)
-    {
+    /**
+     * @param \Closure():?CartPort       $cart      resolved per request; null when Commerce is absent
+     * @param ?\Closure():?OrderReadPort $orderRead public-safe order read for the confirmation (ADR 0026); null → ref-only view
+     * @param ?\Closure():?CatalogReadPort $catalog  resolves a line's SKU to a display name; null → the SKU itself
+     */
+    public function __construct(
+        private \Closure $cart,
+        private ?\Closure $orderRead = null,
+        private ?\Closure $catalog = null,
+    ) {
     }
 
     // --- render (GET sections) ------------------------------------------
@@ -86,7 +95,47 @@ final class StorefrontCart
         if ($ref === null || $request->cookie(self::ORDER_COOKIE) !== $ref) {
             return null;
         }
-        return new PageView('shop-order', ['ref' => $ref], ['title' => 'Order received'], 200, true);
+        // The itemised receipt, or null → the theme falls back to the ref-only view.
+        return new PageView('shop-order', [
+            'ref'   => $ref,
+            'order' => $this->orderSummary($ref),
+        ], ['title' => 'Order received'], 200, true);
+    }
+
+    /**
+     * The visitor's just-placed order, projected public-safe (no PII) by Commerce's
+     * {@see OrderReadPort} and enriched with each line's display name via the catalog.
+     * Null when Commerce is absent or the order can't be read — the confirmation then
+     * shows the reference alone. Only reached after the ORDER_COOKIE gate above.
+     *
+     * @return array{status:string,total:string,lines:list<array{name:string,sku_code:string,qty:int,unit_price:string,line_total:string}>}|null
+     */
+    private function orderSummary(string $ref): ?array
+    {
+        $port = $this->orderRead !== null ? ($this->orderRead)() : null;
+        if ($port === null) {
+            return null;
+        }
+        $order = $port->get($ref);
+        if ($order === null) {
+            return null;
+        }
+        $catalog = $this->catalog !== null ? ($this->catalog)() : null;
+
+        $lines = [];
+        foreach ($order['lines'] as $line) {
+            // Active item → its name; an inactive/deleted SKU → the SKU itself (never blank/500).
+            $item = $catalog?->get($line['sku_code']);
+            $name = is_array($item) ? $item['name'] : $line['sku_code'];
+            $lines[] = [
+                'name'       => $name,
+                'sku_code'   => $line['sku_code'],
+                'qty'        => $line['qty'],
+                'unit_price' => $line['unit_price'],
+                'line_total' => $line['line_total'],
+            ];
+        }
+        return ['status' => $order['status'], 'total' => $order['total'], 'lines' => $lines];
     }
 
     // --- actions (POST /ext) --------------------------------------------
