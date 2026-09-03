@@ -15,7 +15,15 @@
  * @var int $total
  * @var bool $available
  * @var string $cart_csrf
+ * @var array{sku:string,name:string}|null $added the just-added item (flash), or null
+ * @var ?string $notice  a validated notice code, or null
  */
+$notices = [
+    'unavailable' => 'That item is unavailable right now.',
+    'expired'     => 'Your session expired — please try again.',
+    'empty'       => 'Your cart is empty.',
+    'stock'       => 'Sorry, that item just went out of stock.',
+];
 $labels = ['in_stock' => 'In stock', 'low' => 'Low stock', 'out' => 'Out of stock'];
 $sorts  = ['featured' => 'Featured', 'name' => 'Name', 'price_asc' => 'Price: low to high', 'price_desc' => 'Price: high to low'];
 // Preserve the active filters when building a pagination link.
@@ -41,10 +49,19 @@ $pageUrl = static function (int $n) use ($current, $e): string {
 .sf-avail.in_stock{color:#137333}.sf-avail.low{color:#b06000}.sf-avail.out{opacity:.6}
 .sf-pager{display:flex;gap:1rem;justify-content:center;align-items:center;margin:2rem 0 0}
 .sf-empty{padding:3rem 1rem;text-align:center;opacity:.7}
+.sf-flash{margin:0 0 1.25rem;padding:.75rem 1rem;border-radius:.5rem;border:1px solid rgba(128,128,128,.3)}
+.sf-flash-ok{border-color:rgba(19,115,51,.4);background:rgba(19,115,51,.08)}
+.sf-flash-warn{border-color:rgba(176,96,0,.4);background:rgba(176,96,0,.08)}
 </style>
 
 <div class="sf-wrap">
     <h1>Shop</h1>
+
+    <?php if (($added ?? null) !== null): ?>
+        <p class="sf-flash sf-flash-ok" role="status">Added <strong><?= $e($added['name']) ?></strong> to your cart.</p>
+    <?php elseif (($notice ?? null) !== null && isset($notices[$notice])): ?>
+        <p class="sf-flash sf-flash-warn" role="status"><?= $e($notices[$notice]) ?></p>
+    <?php endif; ?>
 
     <form class="sf-filters" method="get" action="/shop" role="search">
         <div class="sf-field">
@@ -100,6 +117,11 @@ $pageUrl = static function (int $n) use ($current, $e): string {
                                 <input type="hidden" name="_cart_csrf" value="<?= $e($cart_csrf ?? '') ?>">
                                 <input type="hidden" name="sku" value="<?= $e($it['sku_code']) ?>">
                                 <input type="hidden" name="qty" value="1">
+                                <input type="hidden" name="return" value="shop">
+                                <input type="hidden" name="category" value="<?= $e($current['category']) ?>">
+                                <input type="hidden" name="q" value="<?= $e($current['q']) ?>">
+                                <input type="hidden" name="sort" value="<?= $e($current['sort']) ?>">
+                                <input type="hidden" name="page" value="<?= $e((string) $page) ?>">
                                 <button type="submit" class="sf-btn">Add to cart</button>
                             </form>
                         <?php endif; ?>
